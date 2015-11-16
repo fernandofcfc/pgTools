@@ -1,0 +1,117 @@
+#!/bin/bash
+# Variaveis que devem ser alteradas
+pg_home="/Library/PostgreSQL/9.4"
+
+# OK
+
+MSG_ERRO="pgGrantDB  <dbname>@<host:<port> [ALL|SELECT] <role>\n\t<host>\t\t--> IP do servidor ( 'local' corresponde a conexao local )\n\t<dbname>\t--> nome da base de dados\n\t<porta>\t--> porta de conexão com o banco\n\t[ALL|SELECT]\t--> Tipo de permissão que será conscedida.\n\t<role>\t--> Nome do grupo que terá direitos de acesso aos objetos desse database."
+[[ ${1} = '-h' ]]  && echo -e "${MSG_ERRO}" && exit 0
+[ ${#} -ne 3 ] && echo -e "${MSG_ERRO}" && exit 1
+
+parameter2=$( echo ${2} | tr [:lower:] [:upper:] )
+
+[[ ${parameter2} != 'ALL' ]] && [[ ${parameter2} != 'SELECT' ]] && echo -e "ERRO - Permissão inválida\n" && echo -e "${MSG_ERRO}" && exit 1
+
+entrada=${1}
+host="127.0.0.1"
+porta="5432"
+
+dbname=$(cut -d'@' -f1 <<< ${entrada})
+entrada=$(cut -d'@' -f2 <<< ${entrada})
+
+if [ ${entrada} != ${dbname} ]; then
+	host=$(cut -d":" -f1 <<< ${entrada})
+    entrada=$(cut -d":" -f2 <<< ${entrada})
+  	if [[ ${entrada} != ${host} ]]; then
+    	porta=${entrada}
+  	fi	
+fi
+
+[[ ${host} = 'local' ]] && host='' || host="-h ${host}"
+[[ ${parameter2} = 'ALL' ]] && grant="'all'" || grant="'select'"
+[[ ${parameter2} = 'ALL' ]] && grant_func="'all'" || grant_func=null
+role=${3}
+
+echo "
+DO
+\$\$
+
+DECLARE r record;
+declare usuario text;
+declare datname text;
+declare permissao_database text;
+declare permissao_schema text;
+declare permissao_tables text;
+declare permissao_sequences text;
+declare permissao_functions text;
+declare permissao_types text;
+
+BEGIN
+
+   	-- definicao de valores
+   	usuario := '${role}';
+   	datname := '${dbname}';
+   	permissao_database := 'CONNECT';
+   	permissao_schema := 'USAGE';
+   	permissao_tables := ${grant};
+   	permissao_sequences := ${grant};
+   	permissao_functions :=  ${grant_func};
+   	permissao_types := null;
+    raise notice '\o /dev/null';
+    raise notice '\c \"%\"', datname;
+   	raise notice 'CREATE ROLE \"%\";', usuario;
+   	raise notice 'REVOKE ALL ON DATABASE \"%\" FROM \"%\";', datname, usuario;
+   	raise notice 'REVOKE ALL ON DATABASE \"%\" FROM \"public\";', datname;
+   	raise notice 'GRANT % ON DATABASE \"%\" TO \"%\";', permissao_database, datname, usuario;
+   	raise notice 'DO';
+   	raise notice '%', chr(36) || chr(36);
+   	raise notice '  DECLARE r1 record;';
+   	raise notice '  BEGIN';
+    raise notice '    raise notice ''Grant % permissions in the % to %.'';', permissao_tables, datname, usuario;
+   	raise notice '    FOR r1 in select nspname from pg_namespace where nspname not like ''pg_%'' and nspname not like ''information_schema'' loop', chr(37);
+   	raise notice '      EXECUTE ''GRANT % ON SCHEMA \"'' || r1.nspname || ''\" TO \"%\"'';', permissao_schema, usuario;
+
+   	if (permissao_tables is not null) then
+    	raise notice '      EXECUTE ''GRANT % ON ALL TABLES IN SCHEMA \"'' || r1.nspname || ''\" TO \"%\"'';', permissao_tables, usuario;
+   	end if;
+
+   	if (permissao_sequences is not null) then
+        raise notice '      EXECUTE ''GRANT % ON ALL SEQUENCES IN SCHEMA \"'' || r1.nspname || ''\" TO \"%\"'';', permissao_tables, usuario;
+   	end if;
+
+   	if (permissao_functions is not null) then
+        raise notice '      EXECUTE ''GRANT % ON ALL FUNCTIONS IN SCHEMA \"'' || r1.nspname || ''\" TO \"%\"'';', permissao_tables, usuario;
+   	end if;
+
+   	/*if (permissao_types is not null) then
+        raise notice '      EXECUTE ''GRANT % ON ALL TYPES IN SCHEMA \"'' || r1.nspname || ''\" TO \"%\"'';', permissao_tables, usuario;
+   	end if;*/
+
+   	raise notice '    END LOOP;';
+
+   	if (permissao_tables = 'all') then
+   		raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO \"%\"'';',usuario;
+   	else 
+   	    raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO \"%\"'';',usuario;
+   	end if;
+
+   	if (permissao_sequences = 'all') then
+   		raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES GRANT SELECT, UPDATE, USAGE ON SEQUENCES TO \"%\"'';',usuario;
+   	else 
+   	    raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES GRANT SELECT, USAGE ON SEQUENCES TO \"%\"'';',usuario;
+   	end if;
+   	if (permissao_functions is not null) then
+   		raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO \"%\"'';',usuario;
+   	end if;
+
+
+   	raise notice '  END';
+   	raise notice '%;', chr(36) || chr(36);
+
+END
+\$\$;
+" | ${pg_home}/bin/psql ${host} -p ${porta}  -d ${dbname} -U postgres 2>&1 | sed 's/^DO//g' | sed 's/NOTICE:  //g' | ${pg_home}/bin/psql ${host} -p ${porta} -d ${dbname} -U postgres
+
+
+
+

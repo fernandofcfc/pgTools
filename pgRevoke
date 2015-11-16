@@ -1,0 +1,69 @@
+#!/bin/bash
+# Variaveis que devem ser alteradas
+pg_home="/Library/PostgreSQL/9.4"
+
+# OK
+
+MSG_ERRO="pgRevokeDB <dbname>@<host:<port> <role>\n\t<host>\t\t--> IP do servidor ( 'local' corresponde a conexao local )\n\t<dbname>\t--> nome da base de dados\n\t<porta>\t--> porta de conexão com o banco\n\t<role>\t--> Nome do grupo que será removido os direitos de acesso aos objetos desse database."
+[[ ${1} = '-h' ]]  && echo -e "${MSG_ERRO}" && exit 0
+[ ${#} -ne 2 ] && echo -e "${MSG_ERRO}" && exit 1
+
+entrada=${1}
+host="127.0.0.1"
+porta="5432"
+
+dbname=$(cut -d'@' -f1 <<< ${entrada})
+entrada=$(cut -d'@' -f2 <<< ${entrada})
+
+if [ ${entrada} != ${dbname} ]; then
+	host=$(cut -d":" -f1 <<< ${entrada})
+    entrada=$(cut -d":" -f2 <<< ${entrada})
+  	if [[ ${entrada} != ${host} ]]; then
+    	porta=${entrada}
+  	fi	
+fi
+[[ ${host} = 'local' ]] && host='' || host="-h ${host}"
+role=${2}
+
+echo "
+DO
+\$\$
+
+DECLARE r record;
+declare usuario text;
+declare datname text;
+declare permissao_database text;
+
+BEGIN
+
+   	-- definicao de valores
+   	usuario := '${role}';
+   	datname := '${dbname}';
+    raise notice '\o /dev/null';
+    raise notice '\c \"%\"', datname; 
+    raise notice 'REVOKE ALL ON DATABASE \"%\" FROM \"%\";', datname, usuario;
+   	raise notice 'DO';
+   	raise notice '%', chr(36) || chr(36);
+   	raise notice '  DECLARE r1 record;';
+   	raise notice '  BEGIN';
+    raise notice 'raise notice ''Revoke all permissions in the % from %.'';', datname, usuario;
+   	raise notice '    FOR r1 in select nspname from pg_namespace where nspname not like ''pg_%'' and nspname not like ''information_schema'' loop', chr(37);
+   	raise notice '      EXECUTE ''REVOKE ALL ON SCHEMA \"'' || r1.nspname || ''\" FROM \"%\"'';', usuario;
+    raise notice '      EXECUTE ''REVOKE ALL ON ALL TABLES IN SCHEMA \"'' || r1.nspname || ''\" FROM \"%\"'';', usuario;
+    raise notice '      EXECUTE ''REVOKE ALL ON ALL SEQUENCES IN SCHEMA \"'' || r1.nspname || ''\" FROM \"%\"'';', usuario;
+    raise notice '      EXECUTE ''REVOKE ALL ON ALL FUNCTIONS IN SCHEMA \"'' || r1.nspname || ''\" FROM \"%\"'';', usuario;
+    --  raise notice '      EXECUTE ''REVOKE ALL ON ALL TYPES IN SCHEMA \"'' || r1.nspname || ''\" FROM \"%\"'';', usuario;
+    raise notice '    END LOOP;';
+    raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES REVOKE ALL ON TABLES FROM \"%\"'';',usuario;
+    raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES REVOKE ALL ON SEQUENCES FROM \"%\"'';',usuario;
+    raise notice '    EXECUTE ''ALTER DEFAULT PRIVILEGES REVOKE ALL ON FUNCTIONS FROM \"%\"'';',usuario;
+   	raise notice '  END';
+   	raise notice '%;', chr(36) || chr(36);
+
+END
+\$\$;
+" | ${pg_home}/bin/psql ${host} -p ${porta}  -d ${dbname} -U postgres 2>&1 | sed 's/^DO//g' | sed 's/NOTICE:  //g'  | ${pg_home}/bin/psql ${host} -p ${porta} -d ${dbname} -U postgres
+
+
+
+
