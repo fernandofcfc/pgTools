@@ -1,0 +1,8 @@
+#!/bin/bash
+MSG_ERRO="Lista Database\n Nome do Servidor"
+[ ${#} -ne 1 ] && echo -e ${MSG_ERRO} && exit 1
+pg_home="/Library/PostgreSQL/9.4"
+consulta="select datname from pg_database where datname not ilike 'template%' order by 1;"
+host=${1}
+${pg_home}/bin/psql -U postgres -h ${host} -t -c "${consulta}" | sed 's/^ //g' | grep -E ^[a-zA-Z]
+exit 0
