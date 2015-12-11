@@ -1,0 +1,43 @@
+#!/bin/sh
+########################################################
+#
+# Script inicializacao de parametros do psql
+#
+########################################################
+ARG1=$1
+
+PSQL_RC="$HOME/.psqlrc"
+PG_HOME="/Library/PostgreSQL/9.5"
+
+LAMBIENTE="PRO db01 db03 db04 db05 db06 dbnfe01 dbnfe02 dbzabbix dbradius01 dbradius02 dfbsa180 dfbsa220 dfbsa223 \nHOM dbhomolog02 dbhomolog03 \nDES dbdes03 "
+
+PROMPT_PROD='%[%033[41;37;1m%](%`date +%H:%M:%S`) %n@%M:%>/%/ %x%#%[%033[0m%] '
+PROMPT_HOM='%[%033[44;37;1m%](%`date +%H:%M:%S`) %n@%M:%>/%/ %x%#%[%033[0m%] '
+PROMPT_DES='%[%033[42;37;1m%](%`date +%H:%M:%S`) %n@%M:%>/%/ %x%#%[%033[0m%] '
+PROMPT_DEFAULT='%[%033[40;37;1m%](%`date +%H:%M:%S`) %n@%M:%>/%/ %x%#%[%033[0m%] '
+
+SERVIDOR=${ARG1:=db03}
+
+AMBIENTE=$(echo $LAMBIENTE | grep " $SERVIDOR" | cut -d' ' -f1)
+
+define_psqlrc() {
+        echo "\set QUIET 1" > $PSQL_RC
+        echo "\pset null '(null)'" >> $PSQL_RC
+        echo "\set AUTOCOMMIT OFF" >> $PSQL_RC
+        echo "\set PROMPT1 '$1'" >> $PSQL_RC
+        echo "\set PROMPT2 '| '" >> $PSQL_RC
+        echo "\set HISTSIZE 5000" >> $PSQL_RC
+        echo "\set HISTFILE ~/.psql_history- :DBNAME" >> $PSQL_RC
+        echo '\\timing' >> $PSQL_RC
+        echo "\set QUIET 0" >> $PSQL_RC
+}
+
+case $AMBIENTE in
+        PRO) define_psqlrc "$PROMPT_PROD" ;;
+        HOM) define_psqlrc "$PROMPT_HOM" ;;
+        DES) define_psqlrc "$PROMPT_DES" ;;
+          *) define_psqlrc "$PROMPT_DEFAULT" ;;
+esac
+
+$PG_HOME/bin/psql -U postgres -h $SERVIDOR
+## FIM DO SCRIPT
