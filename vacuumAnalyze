@@ -1,0 +1,89 @@
+#!/bin/bash
+
+##
+# Script: vacuum_analyze.sh
+# Autor: Vinicius Porto Lima
+# Data: 26/03/2013
+# 
+# Descricao: 
+# Scriptzin meia boca para fazer um vacuum analyze em todas as bases do banco.
+# Para que funcione corretamente, eh necessario configurar a variavel log_dir,
+# ter conexao trust com a base local ou variavel PGPASSWORD setada, e executaveis
+# do postgresql no path, ou adaptar a variavel vacuum_cmd.
+# 
+# Modificacoes:
+# Vinicios Porlo Lima 	26/03/2013	Criacao do script
+# Fernando C F Cabral	14/12/2015	Criacao de Lock e variaveis para controle de execucao de reindex e vacuum full
+##
+
+log_dir=/var/log/vacuum								# diretorio de logs
+log_dir=/tmp
+start=${SECONDS}									# segundo de inicio
+month=$(date +"%Y%m")								# o mes atual
+today=$(date +"%Y-%m-%d %H:%M:%S")					# a data de hoje
+todayBR=$(date +"%d-%m-%Y %H:%M:%S")				# a data de hoje
+#Variaveis para envio de email
+hostname=$(hostname)
+assunto="ERRO vacuumdb - ${hostname} - ${todayBR}"
+para="geasi-dba@conab.gov.br"
+
+# Variaveis para controle de execucao
+executeReindex=true
+executeReindexDate=6 								# SEG-1 TER-2 QUA-3 QUI-4 SEX-5 SAB-6 DOM-7
+
+executeVacuumFull=true								
+executeVacuumFullDate=5								# SEG-1 TER-2 QUA-3 QUI-4 SEX-5 SAB-6 DOM-7
+
+# Arquivo de Lock
+lock=/tmp/vacuumdb.lock
+
+if [ -e ${lock} ]; then
+   mail_log=/tmp/mail.log
+   echo -e "Erro ao executar o script de vacuumdb - ${todayBR}.\n\nVerificações necessárias:\n- execute o comando ps para confirmar que existe execução em andamento.\n	ps -ef | grep vacuum_analyze\n- Não havendo execução, remova o lock.\n	rm ${lock}\n\n___________________________________\nProcessos do PostgreSQL\n"  > ${mail_log}
+   ps -ef  | grep ^postgres | sort >> ${mail_log}
+   cat ${mail_log} | mail -s "$assunto" "$para"
+   exit 1
+fi
+
+# gerando lock
+echo "lock do dia ${todayBR}" > ${lock}
+
+[ ${executeVacuumFull} = true ] && [ $(date +"%u") -eq ${executeVacuumFullDate} ] && op='-f' || op='-z'
+
+vacuum_cmd="/usr/local/pgsql/bin/vacuumdb -U postgres -a $op"		# vacuum analyze das bases de dados da instancia
+reindex_cmd="/usr/local/pgsql/bin/reindexdb -U postgres -a "
+
+error_log=$log_dir/error_${month}.log								# arquivo de erros
+exec_log=$log_dir/exec_${month}.log									# arquivo de logs
+
+echo "- Inicio da execucao do vacuum: dia ${today}" >> ${exec_log}
+echo "- Inicio da execucao do vacuum: dia ${today}" >> ${error_log}
+
+$vacuum_cmd >> ${exec_log} 2>> ${error_log}
+
+today=$(date +"%Y-%m-%d %H:%M:%S")									# a data de hoje
+echo "- Fim da execucao do vacuum: dia ${today}" >> ${exec_log}
+echo "- Fim da execucao do vacuum: dia ${today}" >> ${error_log} 
+echo "${SECONDS} segundos decorridos" >> ${exec_log}
+echo  >> ${exec_log}
+echo  >> ${error_log}
+
+if [ ${executeReindex} = true ] && [ $(date +"%u") -eq ${executeReindexDate} ]; then
+	echo "- Inicio da execucao do reindex: dia ${today}" >> ${exec_log}
+	echo "- Inicio da execucao do reindex: dia ${today}" >> ${error_log}
+	
+	$reindex_cmd >> ${exec_log} 2>> ${error_log}
+	today=$(date +"%Y-%m-%d %H:%M:%S")								# a data de hoje
+	
+	echo "- Fim da execucao do reindex: dia ${today}" >> ${exec_log}
+	echo "- Fim da execucao do reindex: dia ${today}" >> ${error_log} 
+	echo "${SECONDS} segundos decorridos" >> ${exec_log}
+fi
+
+echo -e "________________________________________________________________\n" >> ${exec_log}
+echo -e "________________________________________________________________\n" >> ${error_log}
+
+# removendo lock
+rm -rf ${lock}
+exit 0
+# FIM DO PROGRAMA
